@@ -714,25 +714,29 @@ public class fflib_QueryFactory { //No explicit sharing declaration - inherit fr
 	public String toSOQL(){
 		String result = 'SELECT ';
 		//if no fields have been added, just add the Id field so that the query or subquery will not just fail
-		if (fields.size() == 0){
-			if (mFlsEnforcement == FLSEnforcement.LEGACY){
-				fflib_SecurityUtils.checkFieldIsReadable(table, 'Id');
+		if (isAggregate) {
+			result += toAggregateSOQL();
+		} else {
+			if (fields.size() == 0){
+				if (mFlsEnforcement == FLSEnforcement.LEGACY){
+					fflib_SecurityUtils.checkFieldIsReadable(table, 'Id');
+				}
+				result += 'Id';
+			}else {
+				List<String> fieldsToQuery = new List<String>(fields);
+			
+				if(sortSelectFields){
+					fieldsToQuery.sort(); 
+				}	
+			
+				result += String.join(fieldsToQuery,', ');
 			}
-			result += 'Id';
-		}else {
-			List<String> fieldsToQuery = new List<String>(fields);
-		
-			if(sortSelectFields){
-				fieldsToQuery.sort(); 
-			}	
-		
-			result += String.join(fieldsToQuery,', ');
-		}
-		
-		if(subselectQueryMap != null && !subselectQueryMap.isEmpty()){
-			for (fflib_QueryFactory childRow : subselectQueryMap.values()){
-				result += ', (' + childRow.toSOQL() + ') ';
-			}	
+			
+			if(subselectQueryMap != null && !subselectQueryMap.isEmpty()){
+				for (fflib_QueryFactory childRow : subselectQueryMap.values()){
+					result += ', (' + childRow.toSOQL() + ') ';
+				}	
+			}
 		}
 		result += ' FROM ' + (relationship != null ? relationship.getRelationshipName() : table.getDescribe().getName());
 
@@ -748,11 +752,15 @@ public class fflib_QueryFactory { //No explicit sharing declaration - inherit fr
 			result += ' WITH SYSTEM_MODE';
 		}
 
-		if(order.size() > 0){
+		if(!isAggregate && order.size() > 0){
 			result += ' ORDER BY ';
 			for(Ordering o:order)
 				result += o.toSOQL() +', ';
 			result = result.substring(0,result.length()-2);
+		}
+
+		if (isAggregate && String.isNotBlank(groupBy)) {
+			result += ' GROUP BY ' + groupBy + getNullSafeString(havingClause);
 		}
 	
 		if(limitCount != null)
@@ -838,7 +846,117 @@ public class fflib_QueryFactory { //No explicit sharing declaration - inherit fr
 		}
 	}
 
+	protected String groupBy;
+	protected Boolean isAggregate = false;
+	protected String count;
+	protected String sum;
+	protected String max;
+	protected String min;
+	protected String havingClause;
 
+	public fflib_QueryFactory groupBy(String fieldName)
+	{
+		return setGroupBy(getFieldPath(fieldName));
+	}
+
+	public fflib_QueryFactory groupBy(Schema.SObjectField field)
+	{
+		return setGroupBy(getFieldTokenPath(field));
+	}
+
+	private fflib_QueryFactory setGroupBy(String fieldName)
+	{ 
+		this.groupBy = fieldName;
+		isAggregate = true;
+		return this;		
+	}
+
+	public fflib_QueryFactory count(String alias) 
+	{
+		this.count = 'COUNT(Id) ' + alias + ', ';
+		isAggregate = true;
+		return this;
+	}
+
+	public fflib_QueryFactory sum(String fieldName, String alias)
+	{
+		return setSum(getFieldPath(fieldName), alias);
+	}
+
+	public fflib_QueryFactory sum(Schema.SObjectField field, String alias)
+	{
+		return setSum(getFieldTokenPath(field), alias);
+	}
+
+	private fflib_QueryFactory setSum(String fieldName, String alias) 
+	{
+		this.sum = 'SUM(' + fieldName + ') '+ alias + ', ';
+		isAggregate = true;
+		return this;
+	}
+
+	public fflib_QueryFactory min(String fieldName, String alias)
+	{
+		return setMin(getFieldPath(fieldName), alias);
+	}
+
+	public fflib_QueryFactory min(Schema.SObjectField field, String alias)
+	{
+		return setMin(getFieldTokenPath(field), alias);
+	}
+
+	private fflib_QueryFactory setMin(String fieldName, String alias) 
+	{
+		this.min = 'MIN(' + fieldName + ') '+ alias + ', ';
+		isAggregate = true;
+		return this;
+	}
+
+	public fflib_QueryFactory max(String fieldName, String alias)
+	{
+		return setMax(getFieldPath(fieldName), alias);
+	}
+
+	public fflib_QueryFactory max(Schema.SObjectField field, String alias)
+	{
+		return setMax(getFieldTokenPath(field), alias);
+	}
+
+	private fflib_QueryFactory setMax(String fieldName, String alias) 
+	{
+		this.max = 'MAX(' + fieldName + ') '+ alias + ', ';
+		isAggregate = true;
+		return this;
+	}
+
+	public fflib_QueryFactory setHaving(String condition)
+	{
+		this.havingClause = ' HAVING ' + condition;
+		return this;
+	}
+
+	private String toAggregateSOQL() 
+	{
+		String query = getNullSafeString(count) + getNullSafeString(sum) + getNullSafeString(min) + getNullSafeString(max);
+
+		if (String.isNotBlank(groupBy)) 
+		{
+			if (String.isBlank(query)) 
+			{
+				query = 'COUNT(ID) ,';
+			}
+			query += groupBy;
+		} else 
+		{
+			query = query.left(query.length() - 2);
+		}
+
+		return query;
+	}
+
+	private static String getNullSafeString(String s) {
+		return String.isNotBlank(s) ? s : '';
+	}
 	
 	public class InvalidFieldException extends Exception{
 		private String fieldName;
